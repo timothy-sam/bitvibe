@@ -188,3 +188,107 @@
     )
   )
 )
+
+(define-read-only (is-contract-paused)
+  (var-get contract-paused)
+)
+
+;; PRIVATE FUNCTIONS
+
+(define-private (update-reputation-score (user principal) (points uint))
+  (let (
+    (current-profile (default-to 
+      {
+        reputation-score: u0,
+        last-activity-block: stacks-block-height,
+        total-earnings: u0,
+        engagement-count: u0,
+        reputation-nft-id: none,
+        membership-nft-id: none
+      }
+      (map-get? user-profiles user)
+    ))
+    (current-reputation (unwrap! (get-current-reputation user) ERR-NOT-FOUND))
+    (new-reputation (min-uint (+ current-reputation points) MAX-REPUTATION-SCORE))
+  )
+    (map-set user-profiles user
+      (merge current-profile {
+        reputation-score: new-reputation,
+        last-activity-block: stacks-block-height,
+        engagement-count: (+ (get engagement-count current-profile) u1)
+      })
+    )
+    (ok new-reputation)
+  )
+)
+
+(define-private (mint-reputation-nft (user principal) (reputation uint))
+  (let (
+    (nft-id (+ (var-get total-reputation-nfts) u1))
+  )
+    (try! (nft-mint? reputation-nft nft-id user))
+    (map-set reputation-nft-metadata nft-id {
+      owner: user,
+      reputation-score: reputation,
+      minted-at: stacks-block-height,
+      last-updated: stacks-block-height
+    })
+    (var-set total-reputation-nfts nft-id)
+    (ok nft-id)
+  )
+)
+
+(define-private (mint-membership-nft (user principal) (tier uint))
+  (let (
+    (nft-id (+ (var-get total-membership-nfts) u1))
+  )
+    (try! (nft-mint? membership-nft nft-id user))
+    (map-set membership-nft-metadata nft-id {
+      owner: user,
+      tier-level: tier,
+      granted-at: stacks-block-height,
+      expires-at: none
+    })
+    (var-set total-membership-nfts nft-id)
+    (ok nft-id)
+  )
+)
+
+(define-private (process-engagement-reward (creator principal) (amount uint))
+  (let (
+    (settings (unwrap! (map-get? creator-settings creator) ERR-NOT-FOUND))
+    (reward (get reward-per-engagement settings))
+  )
+    (if (and (get is-active settings) (> reward u0))
+      (begin
+        (try! (stx-transfer? reward (as-contract tx-sender) creator))
+        (map-set creator-settings creator
+          (merge settings {
+            total-distributed: (+ (get total-distributed settings) reward)
+          })
+        )
+        (ok reward)
+      )
+      (ok u0)
+    )
+  )
+)
+
+;; PUBLIC FUNCTIONS - USER OPERATIONS
+
+(define-public (initialize-user-profile)
+  (let (
+    (user tx-sender)
+  )
+    (asserts! (is-none (map-get? user-profiles user)) ERR-ALREADY-EXISTS)
+    (map-set user-profiles user {
+      reputation-score: u100, ;; Starting reputation
+      last-activity-block: stacks-block-height,
+      total-earnings: u0,
+      engagement-count: u0,
+      reputation-nft-id: none,
+      membership-nft-id: none
+    })
+    (ok true)
+  )
+)
