@@ -93,3 +93,98 @@
     processed: bool
   }
 )
+
+(define-map membership-tiers
+  uint
+  {
+    tier-name: (string-ascii 50),
+    min-reputation: uint,
+    benefits: (string-ascii 200),
+    access-level: uint
+  }
+)
+
+(define-map reputation-nft-metadata
+  uint
+  {
+    owner: principal,
+    reputation-score: uint,
+    minted-at: uint,
+    last-updated: uint
+  }
+)
+
+(define-map membership-nft-metadata
+  uint
+  {
+    owner: principal,
+    tier-level: uint,
+    granted-at: uint,
+    expires-at: (optional uint)
+  }
+)
+
+;; HELPER FUNCTIONS
+
+(define-private (min-uint (a uint) (b uint))
+  (if (< a b) a b)
+)
+
+(define-private (max-uint (a uint) (b uint))
+  (if (> a b) a b)
+)
+
+;; READ-ONLY FUNCTIONS
+
+(define-read-only (get-user-profile (user principal))
+  (map-get? user-profiles user)
+)
+
+(define-read-only (get-creator-settings (creator principal))
+  (map-get? creator-settings creator)
+)
+
+(define-read-only (get-current-reputation (user principal))
+  (let (
+    (profile (unwrap! (map-get? user-profiles user) (err u0)))
+    (last-activity (get last-activity-block profile))
+    (current-block stacks-block-height)
+    (blocks-since-activity (- current-block last-activity))
+    (base-reputation (get reputation-score profile))
+  )
+    (if (> blocks-since-activity REPUTATION-DECAY-PERIOD)
+      (let ((decay-factor (/ blocks-since-activity REPUTATION-DECAY-PERIOD)))
+        (if (>= decay-factor base-reputation)
+          (ok u0)
+          (ok (- base-reputation (min-uint decay-factor base-reputation)))
+        )
+      )
+      (ok base-reputation)
+    )
+  )
+)
+
+(define-read-only (get-membership-tier (tier-id uint))
+  (map-get? membership-tiers tier-id)
+)
+
+(define-read-only (get-reputation-nft-info (nft-id uint))
+  (map-get? reputation-nft-metadata nft-id)
+)
+
+(define-read-only (get-membership-nft-info (nft-id uint))
+  (map-get? membership-nft-metadata nft-id)
+)
+
+(define-read-only (calculate-tier-for-reputation (reputation uint))
+  (if (>= reputation u8000)
+    u4 ;; Platinum
+    (if (>= reputation u5000)
+      u3 ;; Gold
+      (if (>= reputation u2000)
+        u2 ;; Silver
+        u1 ;; Bronze
+      )
+    )
+  )
+)
